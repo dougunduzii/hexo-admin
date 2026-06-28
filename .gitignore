@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# SQLite 数据库（含敏感数据）
+*.db
+*.sqlite
+
+# 密码和配置（含敏感信息）
+backend/config.json
+
+# 前端构建产物
+frontend/dist/
+frontend/node_modules/
+
+# IDE / 编辑器
+.vscode/
+.idea/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

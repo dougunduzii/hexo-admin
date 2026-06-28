@@ -1,0 +1,18 @@
+[Unit]
+Description=Hexo Blog Admin API
+After=network.target
+
+[Service]
+Type=simple
+User=www
+WorkingDirectory=/path/to/hexo-admin/backend
+Environment="HEXO_BLOG_PATH=/path/to/blog-hexo"
+Environment="ALLOWED_ORIGINS=https://yourdomain.com"
+ExecStart=/path/to/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
