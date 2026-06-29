@@ -3,6 +3,7 @@ Hexo 博客后台管理系统 - FastAPI 后端
 """
 
 import os
+import tempfile
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Body, UploadFile, File
@@ -13,6 +14,7 @@ from database import get_db, init_db, SessionLocal
 from schemas import PostCreate, PostUpdate, PostResponse, PostListResponse, SyncResult
 from auth import verify_password, require_auth, get_admin_password
 import crud
+from hexo_utils import parse_front_matter
 
 # 从环境变量读取配置
 BLOG_PATH = os.environ.get("HEXO_BLOG_PATH", "")
@@ -104,6 +106,36 @@ def create_post(post_data: PostCreate, db: Session = Depends(get_db), _auth: boo
         return PostResponse.model_validate(post)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建失败: {str(e)}")
+
+
+@app.post("/api/posts/upload-md")
+async def upload_md_file(file: UploadFile = File(...), _auth: bool = Depends(require_auth)):
+    """上传本地 .md 文件，解析 front matter 并返回结构化数据"""
+    if not file.filename or not file.filename.lower().endswith((".md", ".markdown")):
+        raise HTTPException(status_code=400, detail="仅支持 .md / .markdown 格式的 Markdown 文件")
+
+    content = await file.read()
+    text = content.decode("utf-8")
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(text)
+        tmp_path = tmp.name
+
+    try:
+        parsed = parse_front_matter(tmp_path)
+        return {
+            "title": parsed.get("title", ""),
+            "date": parsed.get("date", ""),
+            "categories": parsed.get("categories", ""),
+            "tags": parsed.get("tags", ""),
+            "summary": parsed.get("summary", ""),
+            "content": parsed.get("content", ""),
+            "filename": file.filename,
+        }
+    finally:
+        os.unlink(tmp_path)
 
 
 @app.put("/api/posts/{post_id}", response_model=PostResponse)

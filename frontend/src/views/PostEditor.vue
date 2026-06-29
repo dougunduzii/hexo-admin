@@ -7,6 +7,18 @@
         <p v-else>创建一篇新的博客文章</p>
       </div>
       <div style="display: flex; gap: 8px;">
+        <!-- .md 文件上传 -->
+        <input
+          ref="mdFileInput"
+          type="file"
+          accept=".md,.markdown"
+          style="display: none"
+          @change="handleMdUpload"
+        />
+        <button class="btn btn-outline" @click="$refs.mdFileInput.click()" :disabled="saving"
+          title="上传本地 .md 文件，自动提取标题、标签等信息">
+          📄 上传 .md
+        </button>
         <button class="btn btn-outline" @click="togglePreview" v-if="!saving">
           {{ showPreview ? '📝 编辑' : '👁️ 预览' }}
         </button>
@@ -32,56 +44,63 @@
         </div>
       </div>
 
-      <div class="editor-grid">
+      <div class="editor-grid" :class="{ 'meta-hidden': !showMeta }">
         <!-- 左侧：元数据 -->
-        <div class="card meta-panel">
-          <h3 style="margin-bottom: 16px;">文章属性</h3>
+        <Transition name="slide-panel">
+          <div v-if="showMeta" class="card meta-panel">
+            <h3 style="margin-bottom: 16px;">文章属性</h3>
 
-          <div class="form-group">
-            <label>日期</label>
-            <input v-model="form.date" type="date" />
-          </div>
+            <div class="form-group">
+              <label>日期</label>
+              <input v-model="form.date" type="date" />
+            </div>
 
-          <div class="form-group">
-            <label>分类</label>
-            <input
-              v-model="form.categories"
-              type="text"
-              placeholder="多个分类用英文逗号分隔，如: 前端, Vue"
-            />
-            <div class="form-hint">多个分类用逗号分隔。Hexo 支持层级分类: 父分类, 子分类</div>
-          </div>
+            <div class="form-group">
+              <label>分类</label>
+              <input
+                v-model="form.categories"
+                type="text"
+                placeholder="多个分类用英文逗号分隔，如: 前端, Vue"
+              />
+              <div class="form-hint">多个分类用逗号分隔。Hexo 支持层级分类: 父分类, 子分类</div>
+            </div>
 
-          <div class="form-group">
-            <label>标签</label>
-            <input
-              v-model="form.tags"
-              type="text"
-              placeholder="多个标签用英文逗号分隔，如: Vue, JavaScript"
-            />
-            <div class="form-hint">多个标签用逗号分隔</div>
-          </div>
+            <div class="form-group">
+              <label>标签</label>
+              <input
+                v-model="form.tags"
+                type="text"
+                placeholder="多个标签用英文逗号分隔，如: Vue, JavaScript"
+              />
+              <div class="form-hint">多个标签用逗号分隔</div>
+            </div>
 
-          <div class="form-group">
-            <label>摘要</label>
-            <textarea
-              v-model="form.summary"
-              rows="3"
-              placeholder="文章摘要（可选）"
-            ></textarea>
-          </div>
+            <div class="form-group">
+              <label>摘要</label>
+              <textarea
+                v-model="form.summary"
+                rows="3"
+                placeholder="文章摘要（可选）"
+              ></textarea>
+            </div>
 
-          <div v-if="isEdit" class="form-group">
-            <label>文件名</label>
-            <input :value="postFilename" type="text" disabled
-              style="opacity: 0.6; cursor: not-allowed;" />
+            <div v-if="isEdit" class="form-group">
+              <label>文件名</label>
+              <input :value="postFilename" type="text" disabled
+                style="opacity: 0.6; cursor: not-allowed;" />
+            </div>
           </div>
-        </div>
+        </Transition>
 
         <!-- 右侧：Markdown 编辑区 -->
         <div class="card editor-panel">
           <div class="form-group" style="height: 100%; display: flex; flex-direction: column;">
-            <label>正文（Markdown 格式）</label>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label>正文（Markdown 格式）</label>
+              <button type="button" class="tb-btn" @click="showMeta = !showMeta" :title="showMeta ? '收起属性面板' : '展开属性面板'">
+                {{ showMeta ? '⬅ 收起属性' : '⚙️ 属性' }}
+              </button>
+            </div>
             <!-- 编辑工具栏 -->
             <div class="editor-toolbar">
               <button type="button" class="tb-btn" @click="insertMd('**粗体**')" title="粗体"><b>B</b></button>
@@ -124,8 +143,8 @@
                   <img :src="imageSrc(img.path)" :alt="img.name" />
                   <span>{{ img.name }}</span>
                 </div>
-                <div v-if="inserterImages.length === 0" style="padding:20px;color:var(--text-secondary);text-align:center;grid-column:1/-1;">
-                  加载中...
+                <div v-if="inserterImages.length === 0" class="inserter-empty">
+                  暂无图片
                 </div>
               </div>
             </div>
@@ -135,44 +154,33 @@
     </div>
 
     <!-- 预览模式 -->
-    <div v-else-if="showPreview" class="card">
-      <div class="card-header">
-        <h2>👁️ 预览: {{ form.title || '(无标题)' }}</h2>
-      </div>
+    <div v-else class="card">
       <div class="post-meta-preview">
-        <span v-if="form.date">📅 {{ form.date }}</span>
-        <span v-if="form.categories">📂 {{ form.categories }}</span>
+        <span v-if="form.categories">📁 {{ form.categories }}</span>
         <span v-if="form.tags">🏷️ {{ form.tags }}</span>
+        <span>📅 {{ form.date }}</span>
       </div>
-      <div class="markdown-preview" v-html="renderedContent"></div>
-    </div>
-
-    <!-- 底部操作栏 -->
-    <div class="editor-footer" v-if="!showPreview">
-      <button class="btn btn-outline" @click="goBack">取消</button>
-      <button class="btn btn-primary btn-lg" @click="handleSave" :disabled="saving">
-        {{ saving ? '保存中...' : '💾 保存文章' }}
-      </button>
+      <div class="markdown-preview" v-html="renderedMarkdown"></div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getPost, createPost, updatePost, getImages, imageSrc } from '../api'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { getPost, createPost, updatePost, uploadMdFile } from '../api'
+import { getImages, imageSrc } from '../api'
 import { useToast } from '../composables/useToast'
+import { marked } from 'marked'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-const isEdit = computed(() => !!route.params.id)
 const postId = computed(() => route.params.id)
+const isEdit = computed(() => !!route.params.id)
 
-const form = ref({
+const form = reactive({
   title: '',
   date: new Date().toISOString().slice(0, 10),
   categories: '',
@@ -185,27 +193,20 @@ const postFilename = ref('')
 const saving = ref(false)
 const loadingPost = ref(false)
 const showPreview = ref(false)
-const showImageInserter = ref(false)
-const contentArea = ref(null)
+const showMeta = ref(true)
 
-// 图片插入面板
+const contentArea = ref(null)
+const showImageInserter = ref(false)
 const inserterDir = ref('imgs')
 const inserterImages = ref([])
+const mdFileInput = ref(null)
 
-// 配置 marked 安全选项
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-})
-
-// Markdown 渲染（经过 XSS 净化）
-const renderedContent = computed(() => {
-  if (!form.value.content) return '<p style="color:#999">暂无内容</p>'
+// 渲染 Markdown
+const renderedMarkdown = computed(() => {
   try {
-    const raw = marked.parse(form.value.content)
-    return DOMPurify.sanitize(raw)
+    return marked(form.content || '')
   } catch {
-    return '<p style="color:red">Markdown 解析错误</p>'
+    return '<p>Markdown 渲染错误</p>'
   }
 })
 
@@ -213,22 +214,22 @@ function togglePreview() {
   showPreview.value = !showPreview.value
 }
 
+// 加载文章（编辑模式）
 async function fetchPost() {
-  if (!isEdit.value) return
   loadingPost.value = true
   try {
-    const data = await getPost(Number(postId.value))
-    form.value = {
+    const data = await getPost(postId.value)
+    Object.assign(form, {
       title: data.title || '',
-      date: (data.date || '').slice(0, 10),
+      date: data.date || '',
       categories: data.categories || '',
       tags: data.tags || '',
       summary: data.summary || '',
       content: data.content || '',
-    }
+    })
     postFilename.value = data.filename || ''
   } catch {
-    toast.error('获取文章失败')
+    toast.error('加载文章失败')
     router.push('/posts')
   } finally {
     loadingPost.value = false
@@ -246,7 +247,7 @@ onMounted(() => {
 })
 
 async function handleSave() {
-  if (!form.value.title.trim()) {
+  if (!form.title.trim()) {
     toast.error('请输入文章标题')
     return
   }
@@ -254,12 +255,12 @@ async function handleSave() {
   saving.value = true
   try {
     const payload = {
-      title: form.value.title.trim(),
-      date: form.value.date || new Date().toISOString().slice(0, 10),
-      categories: form.value.categories.trim(),
-      tags: form.value.tags.trim(),
-      summary: form.value.summary.trim(),
-      content: form.value.content,
+      title: form.title.trim(),
+      date: form.date || new Date().toISOString().slice(0, 10),
+      categories: form.categories.trim(),
+      tags: form.tags.trim(),
+      summary: form.summary.trim(),
+      content: form.content,
     }
 
     if (isEdit.value) {
@@ -278,8 +279,34 @@ async function handleSave() {
   }
 }
 
-function goBack() {
-  router.push('/posts')
+// ========== .md 文件上传处理 ==========
+
+async function handleMdUpload(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+
+  try {
+    toast.info('正在解析文件...')
+    const data = await uploadMdFile(file)
+
+    // 将解析结果填入表单（保留已有的值如果解析结果为空）
+    if (data.title) form.title = data.title
+    if (data.date) form.date = data.date
+    if (data.categories) form.categories = data.categories
+    if (data.tags) form.tags = data.tags
+    if (data.summary) form.summary = data.summary
+    form.content = data.content || ''
+
+    toast.success(`已加载: ${data.filename || file.name}`)
+  } catch (err) {
+    const msg = err?.response?.data?.detail || err.message || '文件解析失败'
+    toast.error(msg)
+  } finally {
+    // 重置 input，允许重复上传同一文件
+    if (mdFileInput.value) {
+      mdFileInput.value.value = ''
+    }
+  }
 }
 
 // ========== 编辑器工具栏 ==========
@@ -289,8 +316,8 @@ function insertMd(syntax) {
   if (!el) return
   const start = el.selectionStart
   const end = el.selectionEnd
-  const text = form.value.content
-  form.value.content = text.substring(0, start) + syntax + text.substring(end)
+  const text = form.content
+  form.content = text.substring(0, start) + syntax + text.substring(end)
   // 恢复焦点和光标位置
   setTimeout(() => {
     el.focus()
@@ -329,6 +356,11 @@ watch(showImageInserter, (val) => {
   gap: 20px;
   margin-bottom: 20px;
   align-items: start;
+  transition: grid-template-columns 0.3s ease;
+}
+
+.editor-grid.meta-hidden {
+  grid-template-columns: 1fr;
 }
 
 .meta-panel {
@@ -337,12 +369,12 @@ watch(showImageInserter, (val) => {
 }
 
 .editor-panel {
-  min-height: 500px;
+  min-height: calc(100vh - 280px);
 }
 
 .md-editor {
   flex: 1;
-  min-height: 450px;
+  min-height: calc(100vh - 400px);
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
   font-size: 14px;
   line-height: 1.7;
@@ -440,6 +472,12 @@ watch(showImageInserter, (val) => {
 .slide-enter-from { max-height: 0; opacity: 0; }
 .slide-leave-to { max-height: 0; opacity: 0; }
 
+/* 侧边栏收起动画 */
+.slide-panel-enter-active { transition: all 0.3s ease; }
+.slide-panel-leave-active { transition: all 0.25s ease; }
+.slide-panel-enter-from { opacity: 0; transform: translateX(-20px); }
+.slide-panel-leave-to { opacity: 0; transform: translateX(-20px); }
+
 .post-meta-preview {
   display: flex;
   gap: 16px;
@@ -450,16 +488,9 @@ watch(showImageInserter, (val) => {
   font-size: 14px;
 }
 
-.editor-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 20px 0;
-}
-
 @media (max-width: 900px) {
   .editor-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
   }
   .meta-panel {
     position: static;

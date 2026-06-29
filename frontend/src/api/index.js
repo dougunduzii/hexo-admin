@@ -53,6 +53,15 @@ export function updatePost(id, data) {
   return api.put(`/posts/${id}`, data)
 }
 
+/** 上传本地 .md 文件，解析并返回 front matter + 正文 */
+export function uploadMdFile(file) {
+  const formData = new FormData()
+  formData.append("file", file)
+  return api.post("/posts/upload-md", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  })
+}
+
 /** 删除文章 */
 export function deletePost(id) {
   return api.delete(`/posts/${id}`)
