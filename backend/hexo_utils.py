@@ -90,47 +90,32 @@ def parse_front_matter(filepath: str) -> dict:
 def build_front_matter(post: dict) -> str:
     """
     根据 post 数据构建 front matter 字符串
+    使用 yaml.dump 安全序列化，避免特殊字符导致 YAML 损坏
     """
-    lines = ["---", ""]
-
-    lines.append(f"title: {post.get('title', '')}")
+    fm = {"title": post.get("title", "")}
 
     date_val = post.get("date", "")
-    if date_val:
-        lines.append(f"date: {date_val}")
-    else:
-        lines.append(f"date: {date.today().isoformat()}")
+    fm["date"] = date_val if date_val else date.today().isoformat()
 
     # 分类
     categories = post.get("categories", "")
     if categories:
         cats_list = [c.strip() for c in categories.split(",") if c.strip()]
-        if len(cats_list) == 1:
-            lines.append(f"categories: {cats_list[0]}")
-        elif cats_list:
-            lines.append("categories:")
-            for c in cats_list:
-                lines.append(f"  - {c}")
+        if cats_list:
+            fm["categories"] = cats_list
 
     # 标签
     tags = post.get("tags", "")
     if tags:
         tags_list = [t.strip() for t in tags.split(",") if t.strip()]
-        if len(tags_list) == 1:
-            lines.append(f"tags: {tags_list[0]}")
-        elif tags_list:
-            lines.append("tags:")
-            for t in tags_list:
-                lines.append(f"  - {t}")
+        if tags_list:
+            fm["tags"] = tags_list
 
-    # 摘要
-    summary = post.get("summary", "")
-    lines.append(f"summary: {summary}")
+    # 摘要（始终包含，即使为空）
+    fm["summary"] = post.get("summary", "")
 
-    lines.append("")
-    lines.append("---")
-
-    return "\n".join(lines)
+    yaml_str = yaml.dump(fm, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    return "---\n" + yaml_str.strip() + "\n---"
 
 
 def write_post_file(filename: str, post: dict) -> str:

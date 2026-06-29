@@ -99,7 +99,7 @@ def create_post(db: Session, post_data: PostCreate) -> Post:
 
 def update_post(db: Session, post_id: int, post_data: PostUpdate) -> Post | None:
     """
-    更新文章：先写文件，再更新数据库（保持一致性）
+    更新文章：先写文件，再更新数据库（带文件级回滚保障一致性）
     """
     db_post = db.query(Post).filter(Post.id == post_id).first()
     if not db_post:
@@ -107,6 +107,16 @@ def update_post(db: Session, post_id: int, post_data: PostUpdate) -> Post | None
 
     old_filename = db_post.filename
     update_data = post_data.model_dump(exclude_unset=True)
+
+    # 保存旧值，用于回滚时恢复文件
+    old_values = {
+        "title": db_post.title,
+        "date": db_post.date,
+        "categories": db_post.categories or "",
+        "tags": db_post.tags or "",
+        "summary": db_post.summary or "",
+        "content": db_post.content or "",
+    }
 
     # 如果标题变了，先生成新文件名
     new_filename = old_filename
@@ -132,13 +142,22 @@ def update_post(db: Session, post_id: int, post_data: PostUpdate) -> Post | None
     write_post_file(new_filename, post_dict)
 
     # 文件写入成功，更新数据库
-    for field, value in update_data.items():
-        setattr(db_post, field, value)
-    db_post.filename = new_filename
-    db.commit()
-    db.refresh(db_post)
+    try:
+        for field, value in update_data.items():
+            setattr(db_post, field, value)
+        db_post.filename = new_filename
+        db.commit()
+        db.refresh(db_post)
+    except Exception:
+        db.rollback()
+        # 回滚文件：删除新文件，恢复旧文件内容
+        if new_filename != old_filename:
+            delete_post_file(new_filename)
+        else:
+            write_post_file(old_filename, old_values)
+        raise
 
-    # 如果文件名变了，删除旧文件
+    # 数据库更新成功后才删除旧文件
     if new_filename != old_filename:
         delete_post_file(old_filename)
 
