@@ -109,21 +109,16 @@
               <button type="button" class="tb-btn" @click="insertMd('[链接](url)')" title="链接">🔗</button>
               <button type="button" class="tb-btn" @click="insertMd('\n```\n\n```\n')" title="代码块">📋</button>
               <span class="tb-sep"></span>
+              <button type="button" class="tb-btn" @click="insertMd('> 引用')" title="引用">💬</button>
+              <button type="button" class="tb-btn" @click="insertMd('- 列表项')" title="无序列表">📌</button>
+              <button type="button" class="tb-btn" @click="insertMd('1. 列表项')" title="有序列表">🔢</button>
+              <button type="button" class="tb-btn" @click="insertMd('---\n')" title="分隔线">➖</button>
+              <span class="tb-sep"></span>
               <button type="button" class="tb-btn tb-primary" @click="showImageInserter = !showImageInserter" title="插入图片">
                 🖼️ 插入图片
               </button>
             </div>
-            <textarea
-              ref="contentArea"
-              v-model="form.content"
-              placeholder="在此编写 Markdown 内容...
-
-# 标题
-段落内容...
-
-![图片描述](./imgs/example.png)"
-              class="md-editor"
-            ></textarea>
+            <div ref="editorContainer" class="cm-editor-wrapper"></div>
           </div>
 
           <!-- 图片插入面板 -->
@@ -166,12 +161,22 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getPost, createPost, updatePost, uploadMdFile } from '../api'
 import { getImages, imageSrc } from '../api'
 import { useToast } from '../composables/useToast'
 import { marked } from 'marked'
+
+// CodeMirror 6
+import { EditorView, keymap, placeholder, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
+import { EditorState } from '@codemirror/state'
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput, foldGutter, foldKeymap } from '@codemirror/language'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { html } from '@codemirror/lang-html'
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
+import { languages } from '@codemirror/language-data'
 
 const route = useRoute()
 const router = useRouter()
@@ -195,11 +200,16 @@ const loadingPost = ref(false)
 const showPreview = ref(false)
 const showMeta = ref(true)
 
-const contentArea = ref(null)
+const editorContainer = ref(null)
+const editorView = ref(null)
 const showImageInserter = ref(false)
 const inserterDir = ref('imgs')
 const inserterImages = ref([])
 const mdFileInput = ref(null)
+
+// 防止循环更新
+let syncingFromEditor = false
+let syncingFromForm = false
 
 // 渲染 Markdown
 const renderedMarkdown = computed(() => {
@@ -213,6 +223,103 @@ const renderedMarkdown = computed(() => {
 function togglePreview() {
   showPreview.value = !showPreview.value
 }
+
+// ========== CodeMirror 编辑器初始化 ==========
+
+function createEditor() {
+  if (!editorContainer.value) return
+
+  const extensions = [
+    // 行号 & 折叠
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightActiveLine(),
+    foldGutter(),
+
+    // Markdown 语言支持（含代码块语法高亮）
+    markdown({
+      codeLanguages: languages,
+      defaultCodeLanguage: null,
+    }),
+
+    // HTML 支持（标签自动闭合、属性补全）
+    html({ autoCloseTags: true, selfClosingTags: true }),
+
+    // 自动补全 & 括号闭合
+    autocompletion(),
+    closeBrackets(),
+
+    // 语法高亮 & 括号匹配
+    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    bracketMatching(),
+
+    // 自动缩进
+    indentOnInput(),
+
+    // 撤销历史
+    history(),
+
+    // 占位文本
+    placeholder('在此编写 Markdown 内容...\n\n# 标题\n段落内容...\n\n![图片描述](./imgs/example.png)'),
+
+    // 键盘映射
+    keymap.of([
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...foldKeymap,
+      ...completionKeymap,
+      ...closeBracketsKeymap,
+      indentWithTab,
+    ]),
+
+    // Tab 键大小 = 2 空格
+    EditorState.tabSize.of(2),
+  ]
+
+  const state = EditorState.create({
+    doc: form.content,
+    extensions,
+  })
+
+  const view = new EditorView({
+    state,
+    parent: editorContainer.value,
+    dispatchTransactions(trs) {
+      view.update(trs)
+      // 同步内容到 form.content
+      if (trs.some(tr => tr.docChanged) && !syncingFromForm) {
+        syncingFromEditor = true
+        form.content = view.state.doc.toString()
+        nextTick(() => { syncingFromEditor = false })
+      }
+    },
+  })
+
+  editorView.value = view
+}
+
+function destroyEditor() {
+  editorView.value?.destroy()
+  editorView.value = null
+}
+
+// ========== 内容同步 ==========
+
+// 监听外部 content 变更（如 .md 上传、加载文章）同步到编辑器
+watch(() => form.content, (newVal) => {
+  if (syncingFromEditor) return
+  const view = editorView.value
+  if (!view) return
+
+  const currentDoc = view.state.doc.toString()
+  if (newVal === currentDoc) return
+
+  syncingFromForm = true
+  view.dispatch({
+    changes: { from: 0, to: currentDoc.length, insert: newVal },
+  })
+  nextTick(() => { syncingFromForm = false })
+})
 
 // 加载文章（编辑模式）
 async function fetchPost() {
@@ -244,6 +351,11 @@ watch(() => route.params.id, (newId) => {
 // 首次加载
 onMounted(() => {
   if (isEdit.value) fetchPost()
+  nextTick(() => createEditor())
+})
+
+onUnmounted(() => {
+  destroyEditor()
 })
 
 async function handleSave() {
@@ -289,7 +401,6 @@ async function handleMdUpload(e) {
     toast.info('正在解析文件...')
     const data = await uploadMdFile(file)
 
-    // 将解析结果填入表单（保留已有的值如果解析结果为空）
     if (data.title) form.title = data.title
     if (data.date) form.date = data.date
     if (data.categories) form.categories = data.categories
@@ -302,7 +413,6 @@ async function handleMdUpload(e) {
     const msg = err?.response?.data?.detail || err.message || '文件解析失败'
     toast.error(msg)
   } finally {
-    // 重置 input，允许重复上传同一文件
     if (mdFileInput.value) {
       mdFileInput.value.value = ''
     }
@@ -312,18 +422,33 @@ async function handleMdUpload(e) {
 // ========== 编辑器工具栏 ==========
 
 function insertMd(syntax) {
-  const el = contentArea.value
-  if (!el) return
-  const start = el.selectionStart
-  const end = el.selectionEnd
-  const text = form.content
-  form.content = text.substring(0, start) + syntax + text.substring(end)
-  // 恢复焦点和光标位置
-  setTimeout(() => {
-    el.focus()
-    const pos = start + syntax.length
-    el.setSelectionRange(pos, pos)
-  }, 50)
+  const view = editorView.value
+  if (!view) return
+
+  view.focus()
+  const { from, to } = view.state.selection.main
+  const hasSelection = from !== to
+
+  // 代码块特殊处理：包裹选中文本
+  if (syntax.includes('```')) {
+    if (hasSelection) {
+      const selected = view.state.doc.sliceString(from, to)
+      view.dispatch({
+        changes: { from, to, insert: '\n```\n' + selected + '\n```\n' },
+      })
+    } else {
+      view.dispatch({
+        changes: { from, to, insert: syntax },
+        selection: { anchor: from + 1, head: from + 1 },
+      })
+    }
+    return
+  }
+
+  view.dispatch({
+    changes: { from, to, insert: syntax },
+    selection: { anchor: from + syntax.length },
+  })
 }
 
 function insertImage(img) {
@@ -343,7 +468,6 @@ async function loadInserterImages(dir) {
   }
 }
 
-// 首次打开面板时加载图片
 watch(showImageInserter, (val) => {
   if (val) loadInserterImages('imgs')
 })
@@ -372,14 +496,13 @@ watch(showImageInserter, (val) => {
   min-height: calc(100vh - 280px);
 }
 
-.md-editor {
+/* CodeMirror 容器 */
+.cm-editor-wrapper {
   flex: 1;
-  min-height: calc(100vh - 400px);
-  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
-  font-size: 14px;
-  line-height: 1.7;
-  resize: vertical;
-  tab-size: 2;
+  min-height: calc(100vh - 430px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 /* 编辑器工具栏 */
@@ -495,5 +618,57 @@ watch(showImageInserter, (val) => {
   .meta-panel {
     position: static;
   }
+}
+</style>
+
+<!-- 非 scoped 样式：CodeMirror 6 在 scoped 下选择器不生效 -->
+<style>
+.cm-editor-wrapper .cm-editor {
+  height: 100%;
+  min-height: calc(100vh - 430px);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.cm-editor-wrapper .cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-editor-wrapper .cm-editor .cm-scroller {
+  overflow: auto;
+  padding: 8px 0;
+}
+
+.cm-editor-wrapper .cm-editor .cm-content {
+  padding: 0 12px;
+}
+
+/* 占位文本样式 */
+.cm-editor-wrapper .cm-editor .cm-placeholder {
+  color: #999;
+}
+
+/* 光标颜色 */
+.cm-editor-wrapper .cm-editor .cm-cursor {
+  border-left-color: var(--primary, #4a6cf7);
+}
+
+/* 选中文本颜色 */
+.cm-editor-wrapper .cm-editor .cm-selectionBackground,
+.cm-editor-wrapper .cm-editor.cm-focused .cm-selectionBackground {
+  background: rgba(74, 108, 247, 0.2) !important;
+}
+
+/* 行号区域 */
+.cm-editor-wrapper .cm-editor .cm-gutters {
+  background: var(--bg, #f5f6fa);
+  border-right: 1px solid var(--border, #e0e0e0);
+  color: #aaa;
+}
+
+/* 折叠箭头 */
+.cm-editor-wrapper .cm-editor .cm-foldGutter .cm-gutterElement:hover {
+  color: var(--primary, #4a6cf7);
 }
 </style>
